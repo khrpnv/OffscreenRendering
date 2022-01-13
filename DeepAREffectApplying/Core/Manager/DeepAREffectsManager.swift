@@ -111,7 +111,7 @@ class SampleBufferChannel: NSObject {
 // MARK: - DeepAREffectsManager
 class DeepAREffectsManager: NSObject {
     // MARK: - Properties
-    var completion: ((URL?, Error?) -> ())?
+    var completion: ((Error?) -> ())?
     
     private let deepAR: DeepAR!
     
@@ -134,16 +134,11 @@ class DeepAREffectsManager: NSObject {
     private var ciContext: CIContext? = nil
     
     // MARK: - Init
-    init(asset: AVAsset, maskPath: String, mode: Mode) {
-        self.asset = asset
+    init(inputUrl: URL, outputUrl: URL, deepAR: DeepAR) {
+        self.asset = AVAsset(url: inputUrl)
+        self.outputUrl = outputUrl
         self.serializationQueue = DispatchQueue(label: "DeepAREffectsManager")
-        self.deepAR = DeepAR()
-        super.init()
-        self.outputUrl = createOutputUrl(name: "resultVideo.mp4")
-        self.deepAR.setLicenseKey("0053c29f91b569f151fb7f51b854008316532b26bb839f4ab6a80bd165b5652d46e5848d2a36d382")
-        self.deepAR.changeLiveMode(false)
-        self.deepAR.initializeOffscreen(withWidth: Int(asset.size.width), height: Int(asset.size.height))
-        self.deepAR.switchEffect(withSlot: mode.rawValue, path: maskPath)
+        self.deepAR = deepAR
     }
     
     // MARK: - Start
@@ -423,18 +418,21 @@ private extension DeepAREffectsManager {
 // MARK: - Read and write finish successfully
 private extension DeepAREffectsManager {
     func readingAndWritingDidFinishSuccessfully(success: Bool, withError error: Error?) {
-        if !success {
-            assetReader.cancelReading()
-            assetWriter.cancelWriting()
+        DispatchQueue.main.sync { [weak self] in
+            guard let self = self else { return }
+            if !success {
+                self.assetReader.cancelReading()
+                self.assetWriter.cancelWriting()
+            }
+            
+            self.assetReader = nil
+            self.assetWriter = nil
+            self.audioSampleBufferChannel = nil
+            self.videoSampleBufferChannel = nil
+            self.cancelled = false
+            
+            self.completion?(error)
         }
-        
-        assetReader = nil
-        assetWriter = nil
-        audioSampleBufferChannel = nil
-        videoSampleBufferChannel = nil
-        cancelled = false
-        
-        completion?(outputUrl, error)
     }
 }
 
@@ -471,13 +469,6 @@ extension DeepAREffectsManager: SampleBufferChannelDelegate {
 
 // MARK: - Helpers
 private extension DeepAREffectsManager {
-    func createOutputUrl(name: String) -> URL {
-        let path = NSTemporaryDirectory().appending(name)
-        let exportURL = URL(fileURLWithPath: path)
-        FileManager.default.removeItemIfExisted(exportURL)
-        return exportURL
-    }
-    
     func rad2deg(_ number: CGFloat) -> CGFloat {
         return number * 180 / .pi
     }
